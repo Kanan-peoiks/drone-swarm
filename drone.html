@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI-based UAV Coordination System</title>
+  <style>
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #0b1220;
+      font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    }
+
+    #info {
+      position: absolute;
+      top: 14px;
+      left: 14px;
+      z-index: 10;
+      color: #e8eefc;
+      background: rgba(8, 12, 20, 0.62);
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      backdrop-filter: blur(9px);
+      border-radius: 12px;
+      padding: 14px 16px;
+      max-width: 380px;
+      line-height: 1.5;
+      box-shadow: 0 14px 38px rgba(0, 0, 0, 0.32);
+      font-size: 13px;
+    }
+
+    #info strong {
+      display: block;
+      font-size: 15px;
+      margin-bottom: 6px;
+    }
+
+    #info .hint {
+      opacity: 0.88;
+      margin-top: 8px;
+      font-size: 12px;
+    }
+
+    canvas {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <div id="info">
+    <strong>AI-based UAV Coordination System</strong>
+    Swarm intelligence with Boids + Artificial Potential Fields.
+    <div class="hint">Move the mouse to steer the target on the XZ plane.</div>
+  </div>
+
+  <script type="module">
+    import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js?module';
+    import { OrbitControls } from 'https://unpkg.com/three@0.160.0/examples/jsm/controls/OrbitControls.js?module';
+
+    const clamp = THREE.MathUtils.clamp;
+
+    function rand(min, max) {
+      return min + Math.random() * (max - min);
+    }
+
+    class Environment {
+      constructor(scene) {
+        this.scene = scene;
+        this.buildings = [];
+        this.bounds = { halfWidth: 85, halfDepth: 85 };
+        this._createGround();
+        this._createBuildings();
+        this._createLighting();
+      }
+
+      _createGround() {
+        const ground = new THREE.Mesh(
+          new THREE.PlaneGeometry(220, 220),
+          new THREE.MeshStandardMaterial({ color: 0x162136, roughness: 1, metalness: 0 })
+        );
+        ground.rotation.x = -Math.PI / 2;
+        ground.receiveShadow = true;
+        this.scene.add(ground);
+
+        const grid = new THREE.GridHelper(220, 80, 0x25364d, 0x111c28);
+        grid.position.y = 0.01;
+        this.scene.add(grid);
+      }
+
+      _createLighting() {
+        this.scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+
+        const directional = new THREE.DirectionalLight(0xffffff, 1.2);
+        directional.position.set(40, 80, 35);
+        directional.castShadow = true;
+        directional.shadow.mapSize.set(2048, 2048);
+        directional.shadow.camera.left = -80;
+        directional.shadow.camera.right = 80;
+        directional.shadow.camera.top = 80;
+        directional.shadow.camera.bottom = -80;
+        directional.shadow.camera.near = 1;
+        directional.shadow.camera.far = 220;
+        this.scene.add(directional);
+      }
+
+      _createBuilding(x, z, width, depth, height) {
+        const hue = 0.55 + Math.random() * 0.08;
+        const material = new THREE.MeshStandardMaterial({
+          color: new THREE.Color().setHSL(hue, 0.16, 0.35 + Math.random() * 0.15),
+          roughness: 0.96,
+          metalness: 0.05,
+        });
+
+        const mesh = new THREE.Mesh(new THREE.BoxGeometry(width, height, depth), material);
+        mesh.position.set(x, height / 2, z);
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        this.scene.add(mesh);
+
+        this.buildings.push({
+          mesh,
+          x,
+          z,
+          width,
+          depth,
+          height,
+          halfWidth: width / 2,
+          halfDepth: depth / 2,
+          radiusXZ: Math.max(width, depth) * 0.5,
+        });
+      }
+
+      _createBuildings() {
+        const positions = [
+          [-44, -38], [-24, -43], [-6, -34], [13, -40], [33, -34],
+          [-48, -12], [-27, -15], [-5, -11], [17, -13], [38, -11],
+          [-43, 15], [-18, 11], [2, 15], [24, 12], [46, 16],
+          [-35, 39], [-11, 36], [14, 38], [34, 35],
+        ];
+
+        positions.forEach(([x, z], idx) => {
+          const width = rand(6, 14);
+          const depth = rand(6, 14);
+          const height = rand(12, 48) + (idx % 4 === 0 ? rand(8, 18) : 0);
+          this._createBuilding(x, z, width, depth, height);
+        });
+
+        this._createBuilding(-2, 0, 12, 12, 68);
+        this._createBuilding(20, -4, 10, 10, 55);
+        this._createBuilding(-23, 18, 11, 11, 60);
+      }
+
+      getBuildingList() {
+        return this.buildings;
+      }
+    }
+
+    class Drone {
+      constructor(id, position) {
+        this.id = id;
+        this.position = position.clone();
+        this.velocity = new THREE.Vector3(rand(-1, 1), rand(-0.2, 0.2), rand(-1, 1));
+        this.acceleration = new THREE.Vector3();
+        this.maxSpeed = 7.5;
+        this.maxForce = 10.0;
+        this.radius = 1.7;
+        this.neighborRadius = 14;
+        this.separationRadius = 5.2;
+        this.mesh = this._buildModel();
+        this.mesh.position.copy(this.position);
+      }
+
+      _buildModel() {
+        const group = new THREE.Group();
+
+        const bodyMaterial = new THREE.MeshStandardMaterial({ color: 0xe8f0ff, roughness: 0.55, metalness: 0.2 });
+        const rotorMaterial = new THREE.MeshStandardMaterial({ color: 0x1c2533, roughness: 0.65, metalness: 0.15 });
+        const accentMaterial = new THREE.MeshStandardMaterial({ color: 0x5aa6ff, roughness: 0.4, metalness: 0.12 });
+
+        const body = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.45, 1.2), bodyMaterial);
+        body.castShadow = true;
+        group.add(body);
+
+        const dome = new THREE.Mesh(new THREE.SphereGeometry(0.35, 16, 12), accentMaterial);
+        dome.position.y = 0.35;
+        dome.castShadow = true;
+        group.add(dome);
+
+        const armGeo = new THREE.BoxGeometry(2.6, 0.12, 0.12);
+        const armA = new THREE.Mesh(armGeo, rotorMaterial);
+        const armB = new THREE.Mesh(armGeo, rotorMaterial);
+        armA.rotation.y = Math.PI / 4;
+        armB.rotation.y = -Math.PI / 4;
+        group.add(armA, armB);
+
+        this.propellers = [];
+        const armEnds = [
+          [1.25, 0.06, 1.25],
+          [-1.25, 0.06, 1.25],
+          [1.25, 0.06, -1.25],
+          [-1.25, 0.06, -1.25],
+        ];
+
+        armEnds.forEach(([x, y, z], index) => {
+          const motor = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 0.12, 10), rotorMaterial);
+          motor.position.set(x, y, z);
+          motor.rotation.x = Math.PI / 2;
+          motor.castShadow = true;
+          group.add(motor);
+
+          const propGroup = new THREE.Group();
+          propGroup.position.set(x, y + 0.12, z);
+          const bladeGeo = new THREE.BoxGeometry(0.95, 0.03, 0.1);
+          const bladeA = new THREE.Mesh(bladeGeo, rotorMaterial);
+          const bladeB = new THREE.Mesh(bladeGeo, rotorMaterial);
+          bladeB.rotation.y = Math.PI / 2;
+          propGroup.add(bladeA, bladeB);
+          group.add(propGroup);
+          this.propellers.push(propGroup);
+
+          const light = new THREE.Mesh(
+            new THREE.SphereGeometry(0.07, 10, 8),
+            new THREE.MeshStandardMaterial({
+              color: index % 2 === 0 ? 0xff4d4d : 0x4dff88,
+              emissive: index % 2 === 0 ? 0x550000 : 0x003300,
+            })
+          );
+          light.position.set(x * 0.7, 0.04, z * 0.7);
+          group.add(light);
+        });
+
+        return group;
+      }
+
+      applyForce(force) {
+        this.acceleration.add(force);
+      }
+
+      integrate(dt) {
+        this.velocity.addScaledVector(this.acceleration, dt);
+        const speed = this.velocity.length();
+        if (speed > this.maxSpeed) this.velocity.multiplyScalar(this.maxSpeed / speed);
+
+        this.position.addScaledVector(this.velocity, dt);
+        this.acceleration.set(0, 0, 0);
+
+        this.mesh.position.copy(this.position);
+        const look = this.velocity.clone();
+        look.y = 0;
+        if (look.lengthSq() > 1e-6) {
+          look.normalize();
+          const targetYaw = Math.atan2(look.x, look.z);
+          const currentYaw = this.mesh.rotation.y;
+          let deltaYaw = targetYaw - currentYaw;
+          deltaYaw = ((deltaYaw + Math.PI) % (Math.PI * 2)) - Math.PI;
+          this.mesh.rotation.y += deltaYaw * 0.08;
+        }
+      }
+
+      updatePropellers(dt) {
+        const spin = 18 * dt;
+        this.propellers.forEach((propeller) => {
+          propeller.rotation.y += spin;
+        });
+      }
+    }
+
+    class BoidsEngine {
+      constructor(drones, environment, target) {
+        this.drones = drones;
+        this.environment = environment;
+        this.target = target;
+        this.avoidMargin = 5.5;
+        this.weights = {
+          separation: 2.2,
+          alignment: 0.9,
+          cohesion: 0.7,
+          target: 1.65,
+          obstacle: 3.2,
+          boundary: 1.4,
+        };
+      }
+
+      update(dt) {
+        const buildings = this.environment.getBuildingList();
+
+        for (const drone of this.drones) {
+          const separation = this._calculateSeparation(drone).multiplyScalar(this.weights.separation);
+          const alignment = this._calculateAlignment(drone).multiplyScalar(this.weights.alignment);
+          const cohesion = this._calculateCohesion(drone).multiplyScalar(this.weights.cohesion);
+          const targetForce = this._calculateTargetForce(drone).multiplyScalar(this.weights.target);
+          const obstacleForce = this._calculateObstacleForce(drone, buildings).multiplyScalar(this.weights.obstacle);
+          const boundaryForce = this._calculateBoundaryForce(drone).multiplyScalar(this.weights.boundary);
+
+          const total = new THREE.Vector3()
+            .add(separation)
+            .add(alignment)
+            .add(cohesion)
+            .add(targetForce)
+            .add(obstacleForce)
+            .add(boundaryForce);
+
+          if (total.length() > drone.maxForce) total.setLength(drone.maxForce);
+          drone.applyForce(total);
+        }
+
+        this._resolveDroneIntersections();
+        this._resolveBuildingPenetration();
+      }
+
+      _calculateSeparation(drone) {
+        const steering = new THREE.Vector3();
+        let count = 0;
+
+        for (const other of this.drones) {
+          if (other === drone) continue;
+          const offset = drone.position.clone().sub(other.position);
+          const dist = offset.length();
+          if (dist > 1e-5 && dist < drone.separationRadius) {
+            offset.normalize().divideScalar(dist);
+            steering.add(offset);
+            count++;
+          }
+        }
+
+        if (count > 0) steering.divideScalar(count);
+        if (steering.lengthSq() < 1e-6) return steering;
+
+        steering.setLength(drone.maxSpeed).sub(drone.velocity);
+        if (steering.length() > drone.maxForce) steering.setLength(drone.maxForce);
+        return steering;
+      }
+
+      _calculateAlignment(drone) {
+        const avgVelocity = new THREE.Vector3();
+        let count = 0;
+
+        for (const other of this.drones) {
+          if (other === drone) continue;
+          const dist = drone.position.distanceTo(other.position);
+          if (dist < drone.neighborRadius) {
+            avgVelocity.add(other.velocity);
+            count++;
+          }
+        }
+
+        if (count === 0 || avgVelocity.lengthSq() < 1e-6) return new THREE.Vector3();
+        avgVelocity.divideScalar(count);
+        avgVelocity.setLength(drone.maxSpeed).sub(drone.velocity);
+        if (avgVelocity.length() > drone.maxForce) avgVelocity.setLength(drone.maxForce);
+        return avgVelocity;
+      }
+
+      _calculateCohesion(drone) {
+        const center = new THREE.Vector3();
+        let count = 0;
+
+        for (const other of this.drones) {
+          if (other === drone) continue;
+          const dist = drone.position.distanceTo(other.position);
+          if (dist < drone.neighborRadius) {
+            center.add(other.position);
+            count++;
+          }
+        }
+
+        if (count === 0) return new THREE.Vector3();
+        center.divideScalar(count);
+        return this._seek(drone, center);
+      }
+
+      _calculateTargetForce(drone) {
+        return this._seek(drone, this.target.position);
+      }
+
+      _calculateObstacleForce(drone, buildings) {
+        const force = new THREE.Vector3();
+
+        for (const b of buildings) {
+          const dx = drone.position.x - b.x;
+          const dz = drone.position.z - b.z;
+          const distXZ = Math.sqrt(dx * dx + dz * dz);
+          const clearance = Math.max(b.radiusXZ + this.avoidMargin, 0.001);
+
+          if (distXZ < clearance) {
+            const dir = new THREE.Vector3(dx, 0, dz);
+            if (dir.lengthSq() < 1e-6) dir.set(rand(-1, 1), 0, rand(-1, 1));
+            dir.normalize();
+
+            const strength = 1 / Math.max(0.25, distXZ / clearance);
+            force.addScaledVector(dir, strength * 12.0);
+
+            const minHeight = b.height + 7;
+            if (drone.position.y < minHeight) {
+              force.y += (minHeight - drone.position.y) * 0.8;
+            }
+          }
+        }
+
+        return force;
+      }
+
+      _calculateBoundaryForce(drone) {
+        const bounds = this.environment.bounds;
+        const force = new THREE.Vector3();
+        const margin = 10;
+
+        if (drone.position.x > bounds.halfWidth - margin) force.x -= (drone.position.x - (bounds.halfWidth - margin)) * 0.8;
+        if (drone.position.x < -bounds.halfWidth + margin) force.x += ((-bounds.halfWidth + margin) - drone.position.x) * 0.8;
+        if (drone.position.z > bounds.halfDepth - margin) force.z -= (drone.position.z - (bounds.halfDepth - margin)) * 0.8;
+        if (drone.position.z < -bounds.halfDepth + margin) force.z += ((-bounds.halfDepth + margin) - drone.position.z) * 0.8;
+
+        const minY = 3.5;
+        const maxY = 38;
+        if (drone.position.y < minY) force.y += (minY - drone.position.y) * 1.4;
+        if (drone.position.y > maxY) force.y -= (drone.position.y - maxY) * 0.9;
+
+        return force;
+      }
+
+      _seek(drone, targetPos) {
+        const desired = targetPos.clone().sub(drone.position);
+        const distance = desired.length();
+        if (distance < 1e-6) return new THREE.Vector3();
+
+        desired.normalize();
+        const slowingRadius = 18;
+        const desiredSpeed = distance < slowingRadius ? drone.maxSpeed * (distance / slowingRadius) : drone.maxSpeed;
+        desired.multiplyScalar(desiredSpeed);
+
+        const steer = desired.sub(drone.velocity);
+        if (steer.length() > drone.maxForce) steer.setLength(drone.maxForce);
+        return steer;
+      }
+
+      _resolveDroneIntersections() {
+        for (let i = 0; i < this.drones.length; i++) {
+          for (let j = i + 1; j < this.drones.length; j++) {
+            const a = this.drones[i];
+            const b = this.drones[j];
+            const delta = a.position.clone().sub(b.position);
+            const distance = delta.length();
+            const minDistance = a.radius + b.radius;
+
+            if (distance > 1e-6 && distance < minDistance) {
+              const push = (minDistance - distance) * 0.5;
+              delta.normalize();
+              a.position.addScaledVector(delta, push);
+              b.position.addScaledVector(delta, -push);
+              a.velocity.addScaledVector(delta, 0.35);
+              b.velocity.addScaledVector(delta, -0.35);
+            }
+          }
+        }
+      }
+
+      _resolveBuildingPenetration() {
+        const buildings = this.environment.getBuildingList();
+
+        for (const drone of this.drones) {
+          for (const b of buildings) {
+            const withinX = Math.abs(drone.position.x - b.x) < (b.halfWidth + drone.radius);
+            const withinZ = Math.abs(drone.position.z - b.z) < (b.halfDepth + drone.radius);
+            const withinY = drone.position.y < b.height + drone.radius;
+
+            if (withinX && withinZ && withinY) {
+              const dx = drone.position.x - b.x;
+              const dz = drone.position.z - b.z;
+              const pushX = (b.halfWidth + drone.radius) - Math.abs(dx);
+              const pushZ = (b.halfDepth + drone.radius) - Math.abs(dz);
+
+              if (pushX < pushZ) {
+                drone.position.x += Math.sign(dx || 1) * (pushX + 0.35);
+                drone.velocity.x *= -0.25;
+              } else {
+                drone.position.z += Math.sign(dz || 1) * (pushZ + 0.35);
+                drone.velocity.z *= -0.25;
+              }
+
+              if (drone.position.y < b.height + drone.radius + 1.2) {
+                drone.position.y = b.height + drone.radius + 1.2;
+                drone.velocity.y = Math.max(drone.velocity.y, 0.4);
+              }
+            }
+          }
+        }
+      }
+    }
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0b1220);
+    scene.fog = new THREE.Fog(0x0b1220, 85, 220);
+
+    const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 500);
+    camera.position.set(30, 34, 75);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    document.body.appendChild(renderer.domElement);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.06;
+    controls.target.set(0, 10, 0);
+
+    const environment = new Environment(scene);
+
+    const target = {
+      position: new THREE.Vector3(0, 10, 0),
+      mesh: null,
+    };
+
+    const cursor = {
+      position: new THREE.Vector3(0, 0.15, 0),
+      mesh: null,
+      minY: 0.15,
+      maxY: 24,
+      riseSpeed: 16,
+      fallSpeed: 16,
+      input: {
+        up: false,
+        down: false,
+      },
+    };
+
+    const targetMesh = new THREE.Group();
+
+    const targetSphere = new THREE.Mesh(
+      new THREE.SphereGeometry(0.9, 20, 16),
+      new THREE.MeshStandardMaterial({ color: 0xffcc44, emissive: 0x553300, roughness: 0.35 })
+    );
+    targetSphere.castShadow = true;
+    targetMesh.add(targetSphere);
+
+    const ringMaterial = new THREE.MeshBasicMaterial({
+      color: 0xffcc44,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.55,
+    });
+
+    const targetRings = [
+      new THREE.Mesh(new THREE.RingGeometry(1.2, 1.5, 32), ringMaterial),
+      new THREE.Mesh(new THREE.RingGeometry(1.2, 1.5, 32), ringMaterial),
+      new THREE.Mesh(new THREE.RingGeometry(1.2, 1.5, 32), ringMaterial),
+    ];
+
+    targetRings[0].rotation.x = -Math.PI / 2; // horizontal ring
+    targetRings[1].rotation.y = Math.PI / 2;  // vertical ring XZ
+    targetRings[2].rotation.z = Math.PI / 2;  // vertical ring YZ
+
+    targetRings.forEach((ring) => {
+      ring.position.y = 0;
+      targetMesh.add(ring);
+    });
+
+    targetMesh.position.copy(target.position);
+    scene.add(targetMesh);
+    target.mesh = targetMesh;
+
+    const cursorMesh = new THREE.Group();
+    const cursorBall = new THREE.Mesh(
+      new THREE.SphereGeometry(0.3, 10, 10),
+      new THREE.MeshBasicMaterial({ color: 0xffcc44, transparent: true, opacity: 0.85 })
+    );
+    cursorBall.position.y = 0.15;
+    cursorMesh.add(cursorBall);
+
+    const cursorRing = new THREE.Mesh(
+      new THREE.RingGeometry(0.8, 1.1, 32),
+      new THREE.MeshBasicMaterial({ color: 0x88ccff, side: THREE.DoubleSide, transparent: true, opacity: 0.45 })
+    );
+    cursorRing.rotation.x = -Math.PI / 2;
+    cursorRing.position.y = 0.02;
+    cursorMesh.add(cursorRing);
+    cursorMesh.renderOrder = 1;
+    scene.add(cursorMesh);
+    cursor.mesh = cursorMesh;
+
+    const droneSpawns = [
+      new THREE.Vector3(-18, 8, 24),
+      new THREE.Vector3(-12, 10, 18),
+      new THREE.Vector3(-20, 12, 16),
+      new THREE.Vector3(-10, 14, 26),
+      new THREE.Vector3(-16, 9, 30),
+      new THREE.Vector3(-8, 11, 22),
+      new THREE.Vector3(-24, 13, 20),
+      new THREE.Vector3(-14, 15, 14),
+    ];
+
+    const drones = droneSpawns.map((spawn, index) => {
+      const drone = new Drone(index, spawn);
+      scene.add(drone.mesh);
+      return drone;
+    });
+
+    const boidsEngine = new BoidsEngine(drones, environment, target);
+
+    const raycaster = new THREE.Raycaster();
+    const mouse = new THREE.Vector2();
+    const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+    const hitPoint = new THREE.Vector3();
+
+    function onPointerMove(event) {
+      const rect = renderer.domElement.getBoundingClientRect();
+      mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      mouse.y = -(((event.clientY - rect.top) / rect.height) * 2 - 1);
+
+      raycaster.setFromCamera(mouse, camera);
+      raycaster.ray.intersectPlane(groundPlane, hitPoint);
+
+      if (hitPoint) {
+        cursor.position.x = hitPoint.x;
+        cursor.position.z = hitPoint.z;
+        cursor.mesh.position.copy(cursor.position);
+      }
+    }
+
+    function onPointerClick(event) {
+      const rect = renderer.domElement.getBoundingClientRect();
+      mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      mouse.y = -(((event.clientY - rect.top) / rect.height) * 2 - 1);
+
+      raycaster.setFromCamera(mouse, camera);
+      raycaster.ray.intersectPlane(groundPlane, hitPoint);
+
+      if (hitPoint) {
+        const bounds = environment.bounds;
+        target.position.x = clamp(hitPoint.x, -bounds.halfWidth + 6, bounds.halfWidth - 6);
+        target.position.z = clamp(hitPoint.z, -bounds.halfDepth + 6, bounds.halfDepth - 6);
+        target.position.y = cursor.position.y;
+        target.mesh.position.copy(target.position);
+      }
+    }
+
+    window.addEventListener('pointermove', onPointerMove, { passive: true });
+    window.addEventListener('click', onPointerClick, { passive: true });
+    window.addEventListener('keydown', (event) => {
+      if (event.key === 'Control') cursor.input.up = true;
+      if (event.key === 'Shift') cursor.input.down = true;
+    });
+    window.addEventListener('keyup', (event) => {
+      if (event.key === 'Control') cursor.input.up = false;
+      if (event.key === 'Shift') cursor.input.down = false;
+    });
+
+    const clock = new THREE.Clock();
+
+    function animate() {
+      requestAnimationFrame(animate);
+      const dt = Math.min(clock.getDelta(), 0.033);
+
+      if (cursor.input.up) {
+        cursor.position.y = Math.min(cursor.maxY, cursor.position.y + cursor.riseSpeed * dt);
+      }
+      if (cursor.input.down) {
+        cursor.position.y = Math.max(cursor.minY, cursor.position.y - cursor.fallSpeed * dt);
+      }
+      cursor.mesh.position.copy(cursor.position);
+
+      boidsEngine.update(dt);
+
+      drones.forEach((drone) => {
+        drone.velocity.multiplyScalar(0.995);
+        drone.integrate(dt);
+        drone.updatePropellers(dt);
+
+        if (drone.position.y < 3) {
+          drone.position.y = 3;
+          drone.velocity.y = Math.max(0, drone.velocity.y);
+        }
+      });
+
+      controls.update();
+      renderer.render(scene, camera);
+    }
+
+    animate();
+
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    });
+  </script>
+</body>
+</html>
