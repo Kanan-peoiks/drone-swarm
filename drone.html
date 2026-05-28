@@ -530,34 +530,98 @@
 
     const targetMesh = new THREE.Group();
 
-    const targetSphere = new THREE.Mesh(
-      new THREE.SphereGeometry(0.9, 20, 16),
-      new THREE.MeshStandardMaterial({ color: 0xffcc44, emissive: 0x553300, roughness: 0.35 })
+    const skinMaterial = new THREE.MeshStandardMaterial({ color: 0xffdd88, roughness: 0.35, metalness: 0.05 });
+    const suitMaterial = new THREE.MeshStandardMaterial({ color: 0xffcc44, roughness: 0.22, metalness: 0.1 });
+    const trimMaterial = new THREE.MeshStandardMaterial({ color: 0x553300, roughness: 0.45, metalness: 0.08 });
+
+    const pelvis = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.32, 0.35, 18), suitMaterial);
+    pelvis.position.set(0, 0.35, 0);
+    pelvis.castShadow = true;
+    targetMesh.add(pelvis);
+
+    const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.28, 1.0, 18), suitMaterial);
+    torso.position.set(0, 0.92, 0);
+    torso.castShadow = true;
+    targetMesh.add(torso);
+
+    const shoulder = new THREE.Mesh(new THREE.BoxGeometry(0.82, 0.16, 0.22), suitMaterial);
+    shoulder.position.set(0, 1.35, 0);
+    shoulder.castShadow = true;
+    targetMesh.add(shoulder);
+
+    const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.24, 12), skinMaterial);
+    neck.position.set(0, 1.65, 0);
+    neck.castShadow = true;
+    targetMesh.add(neck);
+
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.28, 18, 16), skinMaterial);
+    head.position.set(0, 1.98, 0);
+    head.castShadow = true;
+    targetMesh.add(head);
+
+    const leftArm = new THREE.Group();
+    const leftUpper = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.52, 12), suitMaterial);
+    leftUpper.position.set(0, -0.24, 0);
+    leftUpper.rotation.z = Math.PI / 8;
+    leftArm.add(leftUpper);
+    const leftLower = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.45, 12), skinMaterial);
+    leftLower.position.set(0, -0.56, 0);
+    leftLower.rotation.z = -Math.PI / 18;
+    leftArm.add(leftLower);
+    leftArm.position.set(-0.5, 1.25, 0);
+    leftArm.rotation.z = Math.PI / 10;
+    targetMesh.add(leftArm);
+
+    const rightArm = new THREE.Group();
+    const rightUpper = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.52, 12), suitMaterial);
+    rightUpper.position.set(0, -0.24, 0);
+    rightUpper.rotation.z = -Math.PI / 8;
+    rightArm.add(rightUpper);
+    const rightLower = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.45, 12), skinMaterial);
+    rightLower.position.set(0, -0.56, 0);
+    rightLower.rotation.z = Math.PI / 18;
+    rightArm.add(rightLower);
+    rightArm.position.set(0.5, 1.25, 0);
+    rightArm.rotation.z = -Math.PI / 10;
+    targetMesh.add(rightArm);
+
+    const leftLeg = new THREE.Group();
+    const leftUpperLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.55, 12), suitMaterial);
+    leftUpperLeg.position.set(0, -0.28, 0);
+    leftUpperLeg.rotation.z = -Math.PI / 40;
+    leftLeg.add(leftUpperLeg);
+    const leftLowerLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.55, 12), suitMaterial);
+    leftLowerLeg.position.set(0, -0.62, 0);
+    leftLowerLeg.rotation.z = Math.PI / 60;
+    leftLeg.add(leftLowerLeg);
+    leftLeg.position.set(-0.16, 0.05, 0);
+    targetMesh.add(leftLeg);
+
+    const rightLeg = new THREE.Group();
+    const rightUpperLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.55, 12), suitMaterial);
+    rightUpperLeg.position.set(0, -0.28, 0);
+    rightUpperLeg.rotation.z = Math.PI / 40;
+    rightLeg.add(rightUpperLeg);
+    const rightLowerLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.55, 12), suitMaterial);
+    rightLowerLeg.position.set(0, -0.62, 0);
+    rightLowerLeg.rotation.z = -Math.PI / 60;
+    rightLeg.add(rightLowerLeg);
+    rightLeg.position.set(0.16, 0.05, 0);
+    targetMesh.add(rightLeg);
+
+    const belt = new THREE.Mesh(new THREE.TorusGeometry(0.34, 0.05, 14, 32), trimMaterial);
+    belt.rotation.x = Math.PI / 2;
+    belt.position.set(0, 0.85, 0);
+    belt.castShadow = true;
+    targetMesh.add(belt);
+
+    const baseRing = new THREE.Mesh(
+      new THREE.RingGeometry(0.95, 1.35, 32),
+      new THREE.MeshBasicMaterial({ color: 0xffcc44, side: THREE.DoubleSide, transparent: true, opacity: 0.38 })
     );
-    targetSphere.castShadow = true;
-    targetMesh.add(targetSphere);
-
-    const ringMaterial = new THREE.MeshBasicMaterial({
-      color: 0xffcc44,
-      side: THREE.DoubleSide,
-      transparent: true,
-      opacity: 0.55,
-    });
-
-    const targetRings = [
-      new THREE.Mesh(new THREE.RingGeometry(1.2, 1.5, 32), ringMaterial),
-      new THREE.Mesh(new THREE.RingGeometry(1.2, 1.5, 32), ringMaterial),
-      new THREE.Mesh(new THREE.RingGeometry(1.2, 1.5, 32), ringMaterial),
-    ];
-
-    targetRings[0].rotation.x = -Math.PI / 2; // horizontal ring
-    targetRings[1].rotation.y = Math.PI / 2;  // vertical ring XZ
-    targetRings[2].rotation.z = Math.PI / 2;  // vertical ring YZ
-
-    targetRings.forEach((ring) => {
-      ring.position.y = 0;
-      targetMesh.add(ring);
-    });
+    baseRing.rotation.x = -Math.PI / 2;
+    baseRing.position.y = 0.05;
+    targetMesh.add(baseRing);
 
     targetMesh.position.copy(target.position);
     scene.add(targetMesh);
