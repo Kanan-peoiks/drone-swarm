@@ -52,7 +52,7 @@
   <div id="info">
     <strong>AI-based UAV Coordination System</strong>
     Swarm intelligence with Boids + Artificial Potential Fields.
-    <div class="hint">Move the mouse to steer the target on the XZ plane.</div>
+    <div class="hint">Move the mouse to position the cursor, then double-click to lock the target at that 3D point.</div>
   </div>
 
   <script type="module">
@@ -163,11 +163,11 @@
         this.position = position.clone();
         this.velocity = new THREE.Vector3(rand(-1, 1), rand(-0.2, 0.2), rand(-1, 1));
         this.acceleration = new THREE.Vector3();
-        this.maxSpeed = 7.5;
-        this.maxForce = 10.0;
+        this.maxSpeed = 14.5;
+        this.maxForce = 16.5;
         this.radius = 1.7;
-        this.neighborRadius = 14;
-        this.separationRadius = 5.2;
+        this.neighborRadius = 18;
+        this.separationRadius = 6.8;
         this.mesh = this._buildModel();
         this.mesh.position.copy(this.position);
       }
@@ -255,7 +255,7 @@
           const currentYaw = this.mesh.rotation.y;
           let deltaYaw = targetYaw - currentYaw;
           deltaYaw = ((deltaYaw + Math.PI) % (Math.PI * 2)) - Math.PI;
-          this.mesh.rotation.y += deltaYaw * 0.08;
+          this.mesh.rotation.y += deltaYaw * 0.22;
         }
       }
 
@@ -274,12 +274,12 @@
         this.target = target;
         this.avoidMargin = 5.5;
         this.weights = {
-          separation: 2.2,
-          alignment: 0.9,
-          cohesion: 0.7,
-          target: 1.65,
-          obstacle: 3.2,
-          boundary: 1.4,
+          separation: 3.1,
+          alignment: 1.4,
+          cohesion: 1.2,
+          target: 2.75,
+          obstacle: 4.5,
+          boundary: 1.9,
         };
       }
 
@@ -426,7 +426,7 @@
         if (distance < 1e-6) return new THREE.Vector3();
 
         desired.normalize();
-        const slowingRadius = 18;
+        const slowingRadius = 10;
         const desiredSpeed = distance < slowingRadius ? drone.maxSpeed * (distance / slowingRadius) : drone.maxSpeed;
         desired.multiplyScalar(desiredSpeed);
 
@@ -519,9 +519,9 @@
       position: new THREE.Vector3(0, 0.15, 0),
       mesh: null,
       minY: 0.15,
-      maxY: 24,
-      riseSpeed: 16,
-      fallSpeed: 16,
+      maxY: 68,
+      riseSpeed: 74,
+      fallSpeed: 44,
       input: {
         up: false,
         down: false,
@@ -566,18 +566,27 @@
     const cursorMesh = new THREE.Group();
     const cursorBall = new THREE.Mesh(
       new THREE.SphereGeometry(0.3, 10, 10),
-      new THREE.MeshBasicMaterial({ color: 0xffcc44, transparent: true, opacity: 0.85 })
+      new THREE.MeshBasicMaterial({ color: 0xffcc44, transparent: true, opacity: 0.95 })
     );
-    cursorBall.position.y = 0.15;
+    cursorBall.position.set(0, 0, 0);
     cursorMesh.add(cursorBall);
 
     const cursorRing = new THREE.Mesh(
-      new THREE.RingGeometry(0.8, 1.1, 32),
-      new THREE.MeshBasicMaterial({ color: 0x88ccff, side: THREE.DoubleSide, transparent: true, opacity: 0.45 })
+      new THREE.RingGeometry(0.9, 1.35, 32),
+      new THREE.MeshBasicMaterial({ color: 0x88ccff, side: THREE.DoubleSide, transparent: true, opacity: 0.55 })
     );
     cursorRing.rotation.x = -Math.PI / 2;
-    cursorRing.position.y = 0.02;
+    cursorRing.position.set(0, 0, 0);
     cursorMesh.add(cursorRing);
+
+    const cursorCenter = new THREE.Mesh(
+      new THREE.RingGeometry(0.25, 0.35, 24),
+      new THREE.MeshBasicMaterial({ color: 0xffcc44, side: THREE.DoubleSide, transparent: true, opacity: 0.75 })
+    );
+    cursorCenter.rotation.x = -Math.PI / 2;
+    cursorCenter.position.set(0, 0, 0);
+    cursorMesh.add(cursorCenter);
+
     cursorMesh.renderOrder = 1;
     scene.add(cursorMesh);
     cursor.mesh = cursorMesh;
@@ -621,7 +630,7 @@
       }
     }
 
-    function onPointerClick(event) {
+    function onPointerDoubleClick(event) {
       const rect = renderer.domElement.getBoundingClientRect();
       mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
       mouse.y = -(((event.clientY - rect.top) / rect.height) * 2 - 1);
@@ -639,7 +648,7 @@
     }
 
     window.addEventListener('pointermove', onPointerMove, { passive: true });
-    window.addEventListener('click', onPointerClick, { passive: true });
+    renderer.domElement.addEventListener('dblclick', onPointerDoubleClick, { passive: true });
     window.addEventListener('keydown', (event) => {
       if (event.key === 'Control') cursor.input.up = true;
       if (event.key === 'Shift') cursor.input.down = true;
@@ -666,7 +675,7 @@
       boidsEngine.update(dt);
 
       drones.forEach((drone) => {
-        drone.velocity.multiplyScalar(0.995);
+        drone.velocity.multiplyScalar(0.998);
         drone.integrate(dt);
         drone.updatePropellers(dt);
 
